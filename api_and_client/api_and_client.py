@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 修正：移除硬编码，改为从外部配置注入（配合 core/config.py）
+# 移除硬编码，改为从外部配置注入（配合 core/config.py）
 B3_EVALUATE_URL = "{base_url}/api/v1/b3/evaluate"
 B3_RULES_URL = "{base_url}/api/v1/b3/rules/{question_id}"  # 新增：获取题目规则的接口
 B4_RESULT_WRITE_URL = "{base_url}/api/v1/submissions/{submission_id}/result"
@@ -33,7 +33,7 @@ class SubmitRequest(BaseModel):
     language: str
     student_user_id: str
 
-    @field_validator('code')
+    @field_validator('code')    # 校验code字段
     def code_not_empty(cls, v):
         if not v or len(v.strip()) == 0:
             raise HTTPException(status_code=400, detail="提交的代码不能为空")
@@ -123,6 +123,8 @@ async def write_result_to_b4(
     logger.info(f"任务ID={submission_id} | B4结果回写成功")
     return True
 
+##此函数并没有被使用，仅是在写接口时用于测试过流程
+'''
 async def execute_evaluation_flow(task: Dict[str, Any]):
     """完整的测评流程：调用B3测评 -> 回写结果到B4"""
     submission_id = task["submission_id"]
@@ -177,6 +179,7 @@ async def execute_evaluation_flow(task: Dict[str, Any]):
 
     if task in task_list:
         task_list.remove(task)
+'''
 
 # =====================  API 接口 =====================
 @router.post("/submission", summary="提交代码进行测评")

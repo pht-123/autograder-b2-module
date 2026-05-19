@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from functools import partial  # 新增：用于绑定函数参数
+from functools import partial
 
 from api_and_client.api_and_client import call_b3_evaluate, write_result_to_b4
 from core.config import Settings, load_settings
@@ -26,16 +26,15 @@ class AppState:
 
 
 async def build_app_state() -> AppState:
-    config = load_settings()
-    logger = build_logger(config.log_dir)
+    config = load_settings()   ##装载配置
+    logger = build_logger(config.log_dir)    ##创建日志工具
 
     repo = SubmissionStateRepository()
     storage = FileStorage(config.code_storage_dir)
 
-    # 修正：绑定 B3/B4 的基础配置（base_url、超时、重试），返回可直接调用的函数
+    # 绑定 B3/B4 的基础配置（base_url、超时、重试），返回可直接调用的函数
     b3 = partial(
         call_b3_evaluate,
-        # 补充：call_b3_evaluate 需支持从配置读取 B3 地址（api_and_client.py 中硬编码的地址需改为配置）
         base_url=config.b3_base_url,
         timeout_s=config.http_timeout_s,
         retry_count=config.http_retry_count
