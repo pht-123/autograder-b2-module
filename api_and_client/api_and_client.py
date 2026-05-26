@@ -4,7 +4,7 @@ from typing import Dict, Any
 from uuid import uuid4
 import httpx
 from pydantic import BaseModel, field_validator
-from fastapi import APIRouter, FastAPI, BackgroundTasks, HTTPException
+from fastapi import APIRouter, FastAPI, BackgroundTasks, HTTPException, Request
 import re
 
 # ===================== 基础配置 =====================
@@ -17,13 +17,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 移除硬编码，改为从外部配置注入（配合 core/config.py）
+# B3/B4 接口地址模板
 B3_EVALUATE_URL = "{base_url}/api/v1/b3/evaluate"
-B3_RULES_URL = "{base_url}/api/v1/b3/rules/{question_id}"  # 新增：获取题目规则的接口
+B3_RULES_URL = "{base_url}/api/v1/b3/rules/{question_id}"
 B4_RESULT_WRITE_URL = "{base_url}/api/v1/submissions/{submission_id}/result"
-
-# 重试与超时配置：改为可配置（从外部传入）
-task_list = []
 
 # ===================== 请求模型定义 =====================
 class SubmitRequest(BaseModel):
@@ -33,7 +30,7 @@ class SubmitRequest(BaseModel):
     language: str
     student_user_id: str
 
-    @field_validator('code')    # 校验code字段
+    @field_validator('code')
     def code_not_empty(cls, v):
         if not v or len(v.strip()) == 0:
             raise HTTPException(status_code=400, detail="提交的代码不能为空")
@@ -45,9 +42,16 @@ class SubmitRequest(BaseModel):
             raise HTTPException(status_code=400, detail="学号必须为纯数字")
         return v
 
+
 # ===================== 工具函数 =====================
-# 修正：支持传入超时、重试参数
-async def async_http_request(method: str, url: str, timeout_s: int, retry_count: int, retry_interval: int = 1, **kwargs) -> Dict[str, Any]:
+async def async_http_request(
+    method: str,
+    url: str,
+    timeout_s: int,
+    retry_count: int,
+    retry_interval: int = 1,
+    **kwargs
+) -> Dict[str, Any]:
     """通用异步HTTP请求工具，支持自定义超时/重试"""
     for retry in range(retry_count):
         try:
@@ -63,18 +67,18 @@ async def async_http_request(method: str, url: str, timeout_s: int, retry_count:
                 raise
             await asyncio.sleep(retry_interval)
 
-# =====================  核心业务逻辑 =====================
-# 修正：新增 base_url/timeout_s/retry_count 参数，支持配置注入
+
+# ===================== B3/B4 调用客户端 =====================
 async def call_b3_evaluate(
-        submission_id: str,
-        question_id: str,
-        code: str,
-        language: str,
-        base_url: str,
-        timeout_s: int,
-        retry_count: int
+    submission_id: str,
+    question_id: str,
+    code: str,
+    language: str,
+    base_url: str,
+    timeout_s: int,
+    retry_count: int
 ) -> Dict[str, Any]:
-    """调用B3动态测评接口（支持配置注入）"""
+    """调用B3动态测评接口"""
     url = B3_EVALUATE_URL.format(base_url=base_url)
     payload = {
         "submission_id": submission_id,
@@ -89,12 +93,12 @@ async def call_b3_evaluate(
         json=payload
     )
 
-# 新增：获取题目规则（配合 evaluation_service.py 中的 get_question_rules 调用）
+
 async def get_question_rules(
-        question_id: str,
-        base_url: str,
-        timeout_s: int,
-        retry_count: int
+    question_id: str,
+    base_url: str,
+    timeout_s: int,
+    retry_count: int
 ) -> Dict[str, Any]:
     """调用B3获取题目规则（禁止模块/函数）"""
     url = B3_RULES_URL.format(base_url=base_url, question_id=question_id)
@@ -104,15 +108,15 @@ async def get_question_rules(
         retry_count=retry_count
     )
 
-# 修正：支持配置注入
+
 async def write_result_to_b4(
-        submission_id: str,
-        result_data: Dict[str, Any],
-        base_url: str,
-        timeout_s: int,
-        retry_count: int
+    submission_id: str,
+    result_data: Dict[str, Any],
+    base_url: str,
+    timeout_s: int,
+    retry_count: int
 ) -> bool:
-    """将测评结果回写到B4系统（支持配置注入）"""
+    """将测评结果回写到B4系统"""
     url = B4_RESULT_WRITE_URL.format(base_url=base_url, submission_id=submission_id)
     await async_http_request(
         "PATCH", url,
@@ -123,89 +127,33 @@ async def write_result_to_b4(
     logger.info(f"任务ID={submission_id} | B4结果回写成功")
     return True
 
-##此函数并没有被使用，仅是在写接口时用于测试过流程
-'''
-async def execute_evaluation_flow(task: Dict[str, Any]):
-    """完整的测评流程：调用B3测评 -> 回写结果到B4"""
-    submission_id = task["submission_id"]
-    try:
-        # 补充：此处需从配置读取 B3/B4 地址（示例）
-        b3_base_url = "http://localhost:8003"
-        b4_base_url = "http://localhost:8004"
-        timeout_s = 10
-        retry_count = 3
 
-        # 步骤1：调用B3进行测评
-        b3_result = await call_b3_evaluate(
-            submission_id=submission_id,
-            question_id=task["question_id"],
-            code=task["code"],
-            language=task["language"],
-            base_url=b3_base_url,
-            timeout_s=timeout_s,
-            retry_count=retry_count
-        )
-
-        # 步骤2：构造回写B4的数据
-        write_data = {
-            "status": "COMPLETED",
-            "overall_score": b3_result.get("score", 0),
-            "passed_count": b3_result.get("passed_count", 0),
-            "total_count": b3_result.get("total_count", 0),
-            "overall_comment": b3_result.get("comment", "测评完成"),
-            "static_issues": b3_result.get("static_issues", []),
-            "case_results": b3_result.get("case_results", [])
-        }
-
-        # 步骤3：回写结果到B4
-        await write_result_to_b4(
-            submission_id=submission_id,
-            result_data=write_data,
-            base_url=b4_base_url,
-            timeout_s=timeout_s,
-            retry_count=retry_count
-        )
-
-    except Exception as e:
-        error_data = {"status": "ERROR", "error_msg": str(e)}
-        await write_result_to_b4(
-            submission_id=submission_id,
-            result_data=error_data,
-            base_url="http://localhost:8004",
-            timeout_s=10,
-            retry_count=3
-        )
-        logger.error(f"任务ID={submission_id} | 测评流程执行失败：{str(e)}")
-
-    if task in task_list:
-        task_list.remove(task)
-'''
-
-# =====================  API 接口 =====================
+# ===================== API 接口 =====================
 @router.post("/submission", summary="提交代码进行测评")
-def submit_code(data: SubmitRequest, background_tasks: BackgroundTasks):
-    submission_id = str(uuid4())
-    task = {
-        "submission_id": submission_id,
-        "question_id": data.question_id,
-        "assignment_id": data.assignment_id,
-        "code": data.code,
-        "language": data.language,
-        "student_user_id": data.student_user_id
-    }
-    task_list.append(task)
+async def submit_code(data: SubmitRequest, request: Request):
+    """
+    接收代码提交，保存到文件，加入异步测评队列
+    """
+    from models.submission import SubmissionCreateRequest
 
-    background_tasks.add_task(execute_evaluation_flow, task)
+    app_state = request.app.state.b2
 
-    logger.info(f"接收到新提交 | 任务ID={submission_id} | 学生ID={data.student_user_id}")
+    create_req = SubmissionCreateRequest(
+        student_user_id=data.student_user_id,
+        question_id=data.question_id,
+        assignment_id=data.assignment_id,
+        code=data.code,
+        language=data.language
+    )
+
+    response = await app_state.submission_service.create_submission(create_req)
+
+    logger.info(f"接收到新提交 | 任务ID={response.submission_id} | 学生ID={data.student_user_id}")
     return {
-        "submission_id": submission_id,
-        "status": "RECEIVED",
+        "submission_id": response.submission_id,
+        "status": response.status,
         "message": "代码接收成功，测评任务已在后台启动"
     }
 
-if __name__ == "__main__":
-    import uvicorn
-    app = FastAPI(title="B2 代码提交与测评", version="1.0")
-    app.include_router(router)
-    uvicorn.run(app, host="0.0.0.0", port=8002, reload=True)
+
+

@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from functools import partial
 
+from services.submission_service import SubmissionService
 from api_and_client.api_and_client import call_b3_evaluate, write_result_to_b4
 from core.config import Settings, load_settings
 from core.logging import build_logger
@@ -23,7 +24,7 @@ class AppState:
     b4: write_result_to_b4
     queue: AsyncTaskQueue
     evaluator: EvaluationService
-
+    submission_service: SubmissionService
 
 async def build_app_state() -> AppState:
     config = load_settings()   ##装载配置
@@ -50,6 +51,14 @@ async def build_app_state() -> AppState:
     queue = AsyncTaskQueue(worker_count=config.worker_count, handler=evaluator.handle_submission)
     await queue.start()
 
+    submission_service = SubmissionService(
+            config=config,
+            repo=repo,
+            storage=storage,
+            queue=queue,
+            logger=logger
+    )
+
     logger.info("event=app_started worker_count=%s", config.worker_count)
     return AppState(
         config=config,
@@ -60,6 +69,7 @@ async def build_app_state() -> AppState:
         b4=b4,
         queue=queue,
         evaluator=evaluator,
+        submission_service=submission_service,
     )
 
 
