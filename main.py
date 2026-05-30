@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from api_and_client.api_and_client import router
-
+from api.v1.submissions import router as submissions_router
 from core.app_state import build_app_state, shutdown_app_state
 from middleware.exception_handler import install_exception_handlers
 from middleware.request_logging import install_request_logging
@@ -15,7 +14,7 @@ def create_app() -> FastAPI:
     install_request_logging(app)
     install_exception_handlers(app)
 
-    app.include_router(router)
+    app.include_router(submissions_router, prefix="/api/v1")
 
     @app.on_event("startup")
     async def _startup() -> None:
@@ -33,7 +32,3 @@ def create_app() -> FastAPI:
 
 app = create_app()
 
-# ===================== 服务启动 =====================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
