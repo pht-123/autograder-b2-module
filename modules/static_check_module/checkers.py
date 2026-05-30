@@ -15,19 +15,6 @@ class SyntaxChecker:
             return self._check_shell(code)
         return []
 
-    def _check_python(self, code: str) -> list[StaticIssue]:
-        try:
-            ast.parse(code)
-            return []
-        except SyntaxError as exc:
-            return [
-                StaticIssue(
-                    type="syntax",
-                    message=str(exc).strip() or "syntax error",
-                    line=getattr(exc, "lineno", None),
-                )
-            ]
-
     def _check_shell(self, code: str) -> list[StaticIssue]:
         try:
             # 使用 bash -n 进行静态语法检查
@@ -56,10 +43,16 @@ class ForbiddenChecker:
         code: str,
         forbidden_modules: list[str] | None,
         forbidden_functions: list[str] | None,
-        language: str = "python",  # 新增参数
+        allowed_commands: list[str] | None = None,
+        language: str = "python",
     ) -> list[StaticIssue]:
-        if language != "python":  # 仅在 Python 中进行禁止模块和函数的检查
-            return []
+        if language == "python":  # 仅在 Python 中进行禁止模块和函数的检查
+            return self._check_python(code, forbidden_modules, forbidden_functions)
+        elif language == "shell":
+            return self._check_shell_commands(code, allowed_commands or [])
+        return []
+
+    def _check_python(self, code: str, forbidden_modules: list[str] | None, forbidden_functions: list[str] | None) -> list[StaticIssue]:
         forbidden_modules = [m for m in (forbidden_modules or []) if m]
         forbidden_functions = [f for f in (forbidden_functions or []) if f]
 
@@ -103,6 +96,23 @@ class ForbiddenChecker:
                             line=getattr(node, "lineno", None),
                         )
                     )
+        return issues
+
+    def _check_shell_commands(self, code: str, allowed_commands: list[str]) -> list[StaticIssue]:
+        issues = []
+        for line_num, line in enumerate(code.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            cmd = stripped.split()[0]
+            if cmd not in allowed_commands:
+                issues.append(
+                    StaticIssue(
+                        type="forbidden",
+                        message=f"使用了不允许的命令: {cmd}",
+                        line=line_num,
+                    )
+                )
         return issues
 
 

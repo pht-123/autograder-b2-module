@@ -51,11 +51,20 @@ class EvaluationService:
         forbidden_modules = list(rules.get("forbidden_modules") or [])
         forbidden_functions = list(rules.get("forbidden_functions") or [])
 
+        if rules.get("language"):
+            state.language = rules["language"]
         # 2) Static check (syntax + forbidden)
         code = self._load_code(state)
 
         syntax_issues = self._syntax.check(code, language=state.language)
-        forbidden_issues = self._forbidden.check(code, forbidden_modules, forbidden_functions, language=state.language)
+        allowed_commands = list(rules.get("allowed_commands") or [])
+        forbidden_issues = self._forbidden.check(
+           code,
+           forbidden_modules,
+           forbidden_functions,
+           allowed_commands=allowed_commands,  # 传入白名单
+           language=state.language
+        )
 
         state.static_issues = [*syntax_issues, *forbidden_issues]
 
