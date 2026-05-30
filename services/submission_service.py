@@ -27,8 +27,9 @@ class SubmissionService:
         self._logger = logger
 
     async def create_submission(self, req: SubmissionCreateRequest) -> SubmissionCreateResponse:
-        if req.language.lower() != "python":
-            raise ValidationError(f"unsupported language: {req.language}")
+        if req.language.lower() not in ("python", "shell"):
+            raise ValidationError(f"unsupported language: {req.language}, only python/shell allowed")
+
 
         submission_id = str(uuid.uuid4())
 

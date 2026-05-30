@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import ast
-
+import subprocess
 from models.submission import StaticIssue
 
 
+import subprocess
+
 class SyntaxChecker:
-    def check(self, code: str) -> list[StaticIssue]:
+    def check(self, code: str, language: str = "python") -> list[StaticIssue]:
+        if language == "python":
+            return self._check_python(code)
+        elif language == "shell":
+            return self._check_shell(code)
+        return []
+
+    def _check_python(self, code: str) -> list[StaticIssue]:
         try:
             ast.parse(code)
             return []
@@ -19,6 +28,27 @@ class SyntaxChecker:
                 )
             ]
 
+    def _check_shell(self, code: str) -> list[StaticIssue]:
+        try:
+            # 使用 bash -n 进行静态语法检查
+            result = subprocess.run(
+                ["bash", "-n"], input=code, text=True,
+                capture_output=True, timeout=5
+            )
+            if result.returncode == 0:
+                return []
+            # 解析 bash -n 的错误输出获取行号和信息
+            return [StaticIssue(
+                type="syntax",
+                message=result.stderr.strip() or "shell syntax error",
+                line=None, # bash -n 错误信息中提取行号较复杂，可暂设为 None
+            )]
+        except FileNotFoundError:
+            return [StaticIssue(type="syntax", message="bash interpreter not found", line=None)]
+        except subprocess.TimeoutExpired:
+            return [StaticIssue(type="syntax", message="shell syntax check timeout", line=None)]
+
+
 
 class ForbiddenChecker:
     def check(
@@ -26,7 +56,10 @@ class ForbiddenChecker:
         code: str,
         forbidden_modules: list[str] | None,
         forbidden_functions: list[str] | None,
+        language: str = "python",  # 新增参数
     ) -> list[StaticIssue]:
+        if language != "python":  # 仅在 Python 中进行禁止模块和函数的检查
+            return []
         forbidden_modules = [m for m in (forbidden_modules or []) if m]
         forbidden_functions = [f for f in (forbidden_functions or []) if f]
 
